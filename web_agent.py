@@ -25,21 +25,38 @@ def search():
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
+    # DuckDuckGo HTML search endpoint
     search_url = f"https://duckduckgo.com/html/?q={query.replace(' ', '+')}"
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(search_url, headers=headers, timeout=10)
 
-    # Very simple URL extractor
-    links = re.findall(r'href="(https?://[^"]+)"', r.text)
-    clean = [
-        l.replace("&amp;", "&")
-        for l in links
-        if "duckduckgo.com" not in l
-        and "youtube.com" not in l
-        and not any(ext in l for ext in [".jpg", ".png", ".gif", ".pdf"])
-    ]
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # DuckDuckGo search results links usually have class "result__a"
+    links = []
+    for a in soup.select("a.result__a"):
+        href = a.get("href")
+        if not href:
+            continue
+        if not href.startswith("http"):
+            continue
+        # Filter out junk
+        if "duckduckgo.com" in href or "youtube.com" in href:
+            continue
+        if any(ext in href for ext in [".jpg", ".png", ".gif", ".pdf"]):
+            continue
+        links.append(href)
+
+    # De-duplicate and limit
+    clean = []
+    seen = set()
+    for l in links:
+        if l not in seen:
+            seen.add(l)
+            clean.append(l)
 
     return jsonify({"query": query, "results": clean[:5]})
+
 
 
 # ---------- scrape endpoint ----------
@@ -72,3 +89,4 @@ def scrape():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
