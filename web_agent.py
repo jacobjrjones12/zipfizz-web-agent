@@ -2,12 +2,10 @@ from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 
-# Initialize Flask app
 app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
 def home():
-    """Simple status check route."""
     return jsonify({"status": "Zipfizz Web Agent is running!"})
 
 
@@ -15,34 +13,30 @@ def home():
 def search():
     """
     GET /search?q=Liquid+IV+Hydration+Sticks
-    Returns: JSON of query + first 5 search results (using DuckDuckGo API fallback)
+    Returns: JSON of query + top URLs via a fallback search endpoint
     """
     query = request.args.get("q")
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
-    # Use DuckDuckGo's lite JSON API instead of HTML parsing
-    api_url = f"https://duckduckgo.com/?q={query.replace(' ', '+')}&format=json&no_redirect=1"
+    # ✅ Use DuckDuckGo's HTML fallback (works without cookies/JS)
+    search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        r = requests.get(api_url, headers=headers, timeout=10)
-        data = r.json()
+        response = requests.get(search_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        results = []
+        for a in soup.select("a.result__a")[:5]:  # Top 5 links
+            href = a.get("href")
+            if href and href.startswith("http"):
+                results.append(href)
+
+        return jsonify({"query": query, "results": results})
+
     except Exception as e:
         return jsonify({"query": query, "results": [], "error": str(e)}), 500
-
-    results = []
-    for item in data.get("RelatedTopics", []):
-        if "FirstURL" in item:
-            results.append(item["FirstURL"])
-        elif "Topics" in item:  # nested topics
-            for sub in item["Topics"]:
-                if "FirstURL" in sub:
-                    results.append(sub["FirstURL"])
-
-    # Filter and limit
-    clean = [u for u in results if u.startswith("http")][:5]
-    return jsonify({"query": query, "results": clean})
 
 
 @app.route("/scrape", methods=["GET"])
@@ -69,5 +63,4 @@ def scrape():
 
 
 if __name__ == "__main__":
-    # Render expects port 10000 for Python services
     app.run(host="0.0.0.0", port=10000)
